@@ -8,16 +8,10 @@ proxyip.oracle.fxxk.dedyn.io
 proxyip.digitalocean.fxxk.dedyn.io
 hk443.018881.xyz
 jp443.008882.xyz
-sg.onecf.eu.org
-nl.onecf.eu.org
-hk.onecf.eu.org
-jp.onecf.eu.org
-us.onecf.eu.org
 cfworkers.yyaan.top
 jp.isnow.pp.ua
+cfip.cfcdn.vip:443
 ProxyIP.JP.CMLiussss.net
 ProxyIP.HK.CMLiussss.net
 proxyip.sg.cmliussss.net
-ips.meizitu.net
 bpb.yousef.isegaro.com
-my-telegram-is-herocore.onecf.eu.org
