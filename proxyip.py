@@ -200,14 +200,15 @@ def run_cloudflarescanner_with_dn():
     if not os.path.isfile(ip_txt_path):
         print(f"未找到 {ip_txt_path}")
         sys.exit(1)
+    
     # 统计ip.txt行数
     ip_count = 0
-    with open(ip_txt_path, ' 'r', encoding='utf-8') as f:
+    with open(ip_txt_path, 'r', encoding='utf-8') as f:
         for line in f:
             if line.strip():
                 ip_count += 1
     try:
-        # 改为同步等待EXE结束
+        # 同步等待EXE结束
         subprocess.run([exe_path, "-dn", str(ip_count)], cwd="CloudflareScanner")
         print(f"已启动 {exe_path} -dn {ip_count}")
     except Exception as e:
@@ -236,17 +237,25 @@ def process_result_csv(
     if not os.path.isfile(input_file):
         print('未找到 CloudflareScanner/result.csv，请确认 CloudflareScanner.exe 已成功运行并生成此文件。')
         sys.exit(1)
-    # 加载国家代码-中文名字典
-    country_dict = {}
-    with open(countries_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            parts = line.strip().split(',')
-            if len(parts) >= 2:
-                code = parts[0].strip()
-                name = parts[1].strip()
-                country_dict[code] = name
+        
+    # 1. 优雅读取本地已经查好的 IP-国家映射，完美避开二次请求 API 导致的 UnknownUnknown
+    ip_country_map = {}
+    allowed_with_info_file = "ips_with_country/allowed_ips_with_country.txt"
+    if os.path.exists(allowed_with_info_file):
+        with open(allowed_with_info_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and '#' in line:
+                    parts = line.split('#')
+                    if len(parts) >= 2:
+                        ip = parts[0].strip()
+                        geo_info = parts[1].strip() # 例如 "HK香港"
+                        # 拆分出2位国家代码和后面的中文名
+                        code = geo_info[:2]
+                        name = geo_info[2:]
+                        ip_country_map[ip] = (code, name)
 
-    # 步骤1：筛选Download Speed (MB/s) > 10的IP，保存到proxyip.txt，并记住速度
+    # 2. 筛选 Download Speed (MB/s) > 10 的 IP
     valid_infos = []
     with open(input_file, 'r', encoding='utf-8') as csvfile:
         first_line = csvfile.readline()
@@ -257,44 +266,44 @@ def process_result_csv(
             try:
                 speed = float(row.get('Download Speed (MB/s)', '0').strip())
                 if speed > 10:
-                    ip = row.get('IP Address', '').strip()
-                    if ip:
-                        valid_infos.append({'ip': ip, 'speed': speed})
+                    raw_ip = row.get('IP Address', '').strip()
+                    # 彻底斩断测速程序可能自带的 :443 端口，同时兼容 IPv6
+                    if ':' in raw_ip:
+                        if ']' in raw_ip:
+                            clean_ip = raw_ip.split(']')[0].replace('[', '')
+                        else:
+                            clean_ip = raw_ip.split(':')[0]
+                    else:
+                        clean_ip = raw_ip
+                    
+                    if clean_ip:
+                        valid_infos.append({'ip': clean_ip, 'speed': speed})
             except Exception as e:
-                print(f"Error parsing row: {row}, error: {e}")
+                print(f"解析行出错: {row}, 错误: {e}")
 
+    # 3. 输出纯净版纯 IP 文件 (供软路由或其他代理客户端直读)
     with open(proxyip_file, 'w', encoding='utf-8') as outfile:
         for info in valid_infos:
             outfile.write(info['ip'] + '\n')
     print(f"筛选完成，共输出 {len(valid_infos)} 个IP到 {proxyip_file}")
 
-    # 步骤2：查询国家信息并根据字典格式化输出
-    def get_country(ip):
-        for attempt in range(RETRY):
-            try:
-                url = f'https://ipinfo.io/{ip}/json'
-                resp = requests.get(url, timeout=5)
-                data = resp.json()
-                if 'country' in data:
-                    return data['country']
-                else:
-                    print(f"{ip} 未返回国家，响应内容：{data}")
-            except Exception as e:
-                print(f"第 {attempt+1} 次获取 {ip} 国家信息失败，错误：{e}")
-            time.sleep(1)  # 每次重试间隔
-        return 'Unknown'
-
+    # 4. 直接从内存比对缝合，彻底消灭 UnknownUnknown，输出高可读性文件
     with open(with_country_file, 'w', encoding='utf-8') as outfile:
         for info in valid_infos:
             ip = info['ip']
             speed = info['speed']
-            country_code = get_country(ip)
-            country_name = country_dict.get(country_code, country_code)
+            
+            if ip in ip_country_map:
+                country_code, country_name = ip_country_map[ip]
+            else:
+                country_code = 'Unknown'
+                country_name = 'Unknown'
+                
             line = f"{ip}#{speed:.2f}(MB/s){country_code}{country_name}\n"
             outfile.write(line)
             print(line.strip())
 
-    print(f"查询国家并格式化输出完成，共输出 {len(valid_infos)} 个IP到 {with_country_file}")
+    print(f"国家信息格式化输出完成，共输出 {len(valid_infos)} 个IP到 {with_country_file}")
 
 def list_files(prefix=""):
     print(f"{prefix} 当前目录内容:")
@@ -342,6 +351,7 @@ if __name__ == "__main__":
     result_csv = 'CloudflareScanner/result.csv'
     if not wait_for_result_csv(result_csv, timeout=600, interval=2):
         sys.exit(1)
+        
     process_result_csv(
         input_file='CloudflareScanner/result.csv',
         proxyip_file='proxyip.txt',
@@ -349,6 +359,7 @@ if __name__ == "__main__":
         countries_file='countries.txt',
         RETRY=10
     )
+    
     # 删除 result.csv 前备份
     backup_result_csv = 'CloudflareScanner/result_bak.csv'
     try:
