@@ -44,7 +44,7 @@ jobs:
 
       # 运行 IP 检查脚本（会同步等待 EXE 完成）
       - name: Run IP checker script
-        run: python DNS2Geo.py
+        run: python proxyip.py
 
       # 检查生成的结果文件
       - name: List directory contents (after)
